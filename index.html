@@ -43,6 +43,7 @@ button{cursor:pointer;}
 .sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap;}
 .wrap{max-width:560px; margin:0 auto; padding:24px 18px 130px;}
 .top{padding:8px 0 16px;}
+.synclink{margin-top:8px; background:none; border:1px solid var(--line); border-radius:999px; padding:5px 14px; font-size:13px; color:var(--sub);}
 .sub{color:var(--sub); margin:2px 0 0; font-size:14px;}
 
 .search input{
@@ -185,6 +186,57 @@ function fmtDate(s){ var m=/^(\d{4})-(\d{2})-(\d{2})$/.exec(s||''); return m?(m[
 var tId;
 function toast(msg){ toastEl.textContent=msg; toastEl.classList.add('show'); clearTimeout(tId); tId=setTimeout(function(){toastEl.classList.remove('show');},2600); }
 
+var EKEY='tea-notes-endpoint';
+function getEndpoint(){ try{ return localStorage.getItem(EKEY)||''; }catch(e){ return ''; } }
+function setEndpoint(u){ try{ localStorage.setItem(EKEY,u); }catch(e){} }
+var syncing=false;
+function syncLabel(){ return getEndpoint()?'同期ずみ':'スプレッドシートと同期'; }
+async function pushToSheet(silent){
+  var ep=getEndpoint(); if(!ep) return;
+  syncing=true; updateSyncBtn();
+  try{
+    await fetch(ep,{method:'POST',headers:{'Content-Type':'text/plain;charset=utf-8'},body:JSON.stringify(records)});
+    if(!silent) toast('スプレッドシートに同期しました');
+  }catch(e){
+    if(!silent) toast('同期に失敗しました(オフラインの可能性があります)');
+  }
+  syncing=false; updateSyncBtn();
+}
+async function pullFromSheet(silent){
+  var ep=getEndpoint(); if(!ep) return;
+  syncing=true; updateSyncBtn();
+  try{
+    var res=await fetch(ep);
+    var remote=await res.json();
+    if(Array.isArray(remote)){ records=remote; persist(); if(view.name==='list') renderList(); }
+    if(!silent) toast('最新のデータを取得しました');
+  }catch(e){
+    if(!silent) toast('取得に失敗しました(オフラインの可能性があります)');
+  }
+  syncing=false; updateSyncBtn();
+}
+function updateSyncBtn(){
+  var b=document.getElementById('syncbtn'); if(!b) return;
+  b.textContent=syncing?'同期中…':syncLabel();
+}
+function openSyncSetup(){
+  var cur=getEndpoint();
+  if(cur){
+    var choice=window.prompt('新しい同期URLに変える場合はここに貼り付けてOK。今すぐ同期し直すだけなら空のままOK。解除する場合はキャンセルを押してください。','');
+    if(choice===null){
+      if(window.confirm('同期を解除しますか?')){ setEndpoint(''); toast('同期を解除しました'); updateSyncBtn(); }
+      return;
+    }
+    if(choice.trim()){ setEndpoint(choice.trim()); }
+    pullFromSheet();
+    return;
+  }
+  var url=window.prompt('Google Apps ScriptのウェブアプリURLを貼り付けてください。');
+  if(!url||!url.trim()) return;
+  setEndpoint(url.trim());
+  pullFromSheet().then(function(){ pushToSheet(true); });
+}
+
 function csvCell(v){
   v=v==null?'':String(v);
   return /[",\n]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v;
@@ -266,7 +318,8 @@ function renderList(){
   view.name='list'; view.confirmDel=false;
   app.innerHTML=
    '<div class="wrap">'+
-   '<header class="top"><h1>茶ノート</h1><p class="sub">'+records.length+'杯を記録</p></header>'+
+   '<header class="top"><h1>茶ノート</h1><p class="sub">'+records.length+'杯を記録</p>'+
+   '<button class="synclink" id="syncbtn" data-act="sync">'+syncLabel()+'</button></header>'+
    (records.length?'<label class="search"><span class="sr">検索</span><input id="q" type="search" placeholder="名前・産地・メモで探す" value="'+esc(view.q)+'"></label>'+
      '<div class="chips filters" role="group" aria-label="総合評価で絞り込む">'+RF.map(function(f){
        return '<button type="button" class="chip" data-act="rf" data-v="'+f[0]+'" aria-pressed="'+(view.rf===f[0])+'">'+f[1]+'</button>';
@@ -424,6 +477,7 @@ app.addEventListener('click',function(e){
   var b=e.target.closest('[data-act]'); if(!b) return;
   var act=b.getAttribute('data-act'), d=view.draft;
   if(act==='new'){ view.draft=newDraft(); view.isNew=true; renderEdit(); }
+  else if(act==='sync'){ openSyncSetup(); }
   else if(act==='export'){ doExport(); }
   else if(act==='open'){
     var r=records.filter(function(x){return x.id===b.getAttribute('data-id');})[0]; if(!r) return;
@@ -472,16 +526,17 @@ app.addEventListener('click',function(e){
     d.name=d.name.trim();
     var idx=records.findIndex(function(x){return x.id===d.id;});
     if(idx>-1) records[idx]=d; else records.unshift(d);
-    persist(); toast('保存しました'); renderList();
+    persist(); toast('保存しました'); renderList(); pushToSheet(true);
   }
   else if(act==='del'){
     if(!view.confirmDel){ view.confirmDel=true; b.textContent='もう一度押すと削除'; return; }
     records=records.filter(function(x){return x.id!==d.id;});
-    persist(); toast('削除しました'); renderList();
+    persist(); toast('削除しました'); renderList(); pushToSheet(true);
   }
 });
 
 renderList();
+if(getEndpoint()) pullFromSheet(true);
 })();
 </script>
 </body>
