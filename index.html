@@ -208,17 +208,29 @@ function buildCSV(list){
 }
 async function doExport(){
   if(!records.length) return;
-  var dl=null;
-  try{ dl=await claude.use('downloads'); }catch(e){}
-  if(!dl){ toast('この環境では書き出しに対応していません。'); return; }
   var sorted=records.slice().sort(function(a,b){ return (b.date||'').localeCompare(a.date||'')||b.created-a.created; });
   var csv=buildCSV(sorted);
   var fname='tea-notes-'+today()+'.csv';
+  var dl=null;
+  try{ if(window.claude&&window.claude.use) dl=await window.claude.use('downloads'); }catch(e){}
+  if(dl){
+    try{
+      var res=await dl.save({filename:fname,data:csv});
+      toast(res.status==='saved'?'書き出しました':'完了しました');
+      return;
+    }catch(err){
+      if(err&&err.code==='declined') return;
+      /* fall through to browser download */
+    }
+  }
   try{
-    var res=await dl.save({filename:fname,data:csv});
-    toast(res.status==='saved'?'書き出しました':'完了しました');
-  }catch(err){
-    if(err&&err.code==='declined') return;
+    var blob=new Blob([csv],{type:'text/csv;charset=utf-8;'});
+    var url=URL.createObjectURL(blob);
+    var a=document.createElement('a');
+    a.href=url; a.download=fname; document.body.appendChild(a); a.click();
+    setTimeout(function(){ document.body.removeChild(a); URL.revokeObjectURL(url); },1000);
+    toast('書き出しました');
+  }catch(e){
     toast('書き出しに失敗しました。もう一度お試しください。');
   }
 }
