@@ -190,28 +190,21 @@ var EKEY='tea-notes-endpoint';
 function getEndpoint(){ try{ return localStorage.getItem(EKEY)||''; }catch(e){ return ''; } }
 function setEndpoint(u){ try{ localStorage.setItem(EKEY,u); }catch(e){} }
 var syncing=false;
-function syncLabel(){ return getEndpoint()?'同期ずみ':'スプレッドシートと同期'; }
+function syncLabel(){ return getEndpoint()?'スプレッドシートと同期':'スプレッドシートと同期'; }
+async function fetchRemote(){
+  var ep=getEndpoint(); if(!ep) return null;
+  var res=await fetch(ep);
+  var remote=await res.json();
+  return Array.isArray(remote)?remote:null;
+}
 async function pushToSheet(silent){
   var ep=getEndpoint(); if(!ep) return;
   syncing=true; updateSyncBtn();
   try{
     await fetch(ep,{method:'POST',headers:{'Content-Type':'text/plain;charset=utf-8'},body:JSON.stringify(records)});
-    if(!silent) toast('スプレッドシートに同期しました');
+    if(!silent) toast('スプレッドシートに送信しました');
   }catch(e){
-    if(!silent) toast('同期に失敗しました(オフラインの可能性があります)');
-  }
-  syncing=false; updateSyncBtn();
-}
-async function pullFromSheet(silent){
-  var ep=getEndpoint(); if(!ep) return;
-  syncing=true; updateSyncBtn();
-  try{
-    var res=await fetch(ep);
-    var remote=await res.json();
-    if(Array.isArray(remote)){ records=remote; persist(); if(view.name==='list') renderList(); }
-    if(!silent) toast('最新のデータを取得しました');
-  }catch(e){
-    if(!silent) toast('取得に失敗しました(オフラインの可能性があります)');
+    if(!silent) toast('送信に失敗しました(オフラインの可能性があります)');
   }
   syncing=false; updateSyncBtn();
 }
@@ -219,22 +212,63 @@ function updateSyncBtn(){
   var b=document.getElementById('syncbtn'); if(!b) return;
   b.textContent=syncing?'同期中…':syncLabel();
 }
+/* ---------- sync view: explicit, confirmed pull/push with counts shown ---------- */
+function renderSync(){
+  view.name='sync';
+  var ep=getEndpoint();
+  app.innerHTML=
+   '<div class="wrap">'+
+   '<header class="top"><h1>スプレッドシートと同期</h1></header>'+
+   '<section class="section" style="border-top:0">'+
+    (ep?
+      '<p class="sub">設定中のURL:<br><span style="word-break:break-all">'+esc(ep)+'</span></p>'+
+      '<div class="field" style="margin:18px 0"><span>この端末の記録</span>'+records.length+'件</div>'+
+      '<div class="field" style="margin:18px 0"><span>スプレッドシートの記録</span><span id="remoteCount">確認中…</span></div>'+
+      '<button class="btn" style="width:100%; margin-bottom:10px" data-act="sync-pull">スプレッドシート→この端末に取得</button>'+
+      '<p class="sub" style="margin:-4px 0 18px">この端末の記録が、スプレッドシートの内容で置き換わります。</p>'+
+      '<button class="btn" style="width:100%; margin-bottom:10px" data-act="sync-push">この端末→スプレッドシートに送信</button>'+
+      '<p class="sub" style="margin:-4px 0 18px">スプレッドシートの内容が、この端末の記録で置き換わります。</p>'+
+      '<button class="btn" style="width:100%; margin-bottom:10px" data-act="sync-url">URLを変更する</button>'+
+      '<button class="btn danger" style="width:100%" data-act="sync-clear">同期を解除する</button>'
+      :
+      '<p class="sub" style="margin-bottom:16px">Google Apps ScriptのウェブアプリURLを設定すると、記録をスプレッドシートと同期できます。</p>'+
+      '<button class="btn primary" style="width:100%" data-act="sync-url">URLを設定する</button>'
+    )+
+   '</section></div>'+
+   '<div class="dock"><div class="inner"><button class="btn" data-act="back">戻る</button></div></div>';
+  if(ep) refreshRemoteCount();
+}
+async function refreshRemoteCount(){
+  var el=document.getElementById('remoteCount'); if(!el) return;
+  try{
+    var remote=await fetchRemote();
+    if(!document.getElementById('remoteCount')) return; /* view changed while awaiting */
+    el.textContent=remote?remote.length+'件':'取得できませんでした';
+  }catch(e){
+    if(document.getElementById('remoteCount')) el.textContent='取得できませんでした';
+  }
+}
+async function doPull(){
+  var remote;
+  try{ remote=await fetchRemote(); }catch(e){ remote=null; }
+  if(!remote){ toast('スプレッドシートから取得できませんでした(オフラインの可能性があります)'); return; }
+  if(!window.confirm('この端末の記録('+records.length+'件)を、スプレッドシートの記録('+remote.length+'件)で置き換えます。よろしいですか?')) return;
+  records=remote; persist(); toast('取得して置き換えました'); renderList();
+}
+async function doPush(){
+  var remote;
+  try{ remote=await fetchRemote(); }catch(e){ remote=null; }
+  var remoteDesc=remote?remote.length+'件':'確認できませんでした';
+  if(!window.confirm('スプレッドシートの記録('+remoteDesc+')を、この端末の記録('+records.length+'件)で置き換えます。よろしいですか?')) return;
+  await pushToSheet(false);
+  renderSync();
+}
 function openSyncSetup(){
   var cur=getEndpoint();
-  if(cur){
-    var choice=window.prompt('新しい同期URLに変える場合はここに貼り付けてOK。今すぐ同期し直すだけなら空のままOK。解除する場合はキャンセルを押してください。','');
-    if(choice===null){
-      if(window.confirm('同期を解除しますか?')){ setEndpoint(''); toast('同期を解除しました'); updateSyncBtn(); }
-      return;
-    }
-    if(choice.trim()){ setEndpoint(choice.trim()); }
-    pullFromSheet();
-    return;
-  }
-  var url=window.prompt('Google Apps ScriptのウェブアプリURLを貼り付けてください。');
+  var url=window.prompt(cur?'新しいURLを貼り付けてください。':'Google Apps ScriptのウェブアプリURLを貼り付けてください。', cur||'');
   if(!url||!url.trim()) return;
   setEndpoint(url.trim());
-  pullFromSheet().then(function(){ pushToSheet(true); });
+  renderSync();
 }
 
 function csvCell(v){
@@ -481,7 +515,13 @@ app.addEventListener('click',function(e){
   var b=e.target.closest('[data-act]'); if(!b) return;
   var act=b.getAttribute('data-act'), d=view.draft;
   if(act==='new'){ view.draft=newDraft(); view.isNew=true; renderEdit(); }
-  else if(act==='sync'){ openSyncSetup(); }
+  else if(act==='sync'){ renderSync(); }
+  else if(act==='sync-url'){ openSyncSetup(); }
+  else if(act==='sync-pull'){ doPull(); }
+  else if(act==='sync-push'){ doPush(); }
+  else if(act==='sync-clear'){
+    if(window.confirm('同期を解除しますか?(スプレッドシート上のデータは消えません)')){ setEndpoint(''); toast('同期を解除しました'); renderSync(); }
+  }
   else if(act==='export'){ doExport(); }
   else if(act==='open'){
     var r=records.filter(function(x){return x.id===b.getAttribute('data-id');})[0]; if(!r) return;
@@ -540,7 +580,6 @@ app.addEventListener('click',function(e){
 });
 
 renderList();
-if(getEndpoint()) pullFromSheet(true);
 })();
 </script>
 </body>
