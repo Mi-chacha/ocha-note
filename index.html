@@ -242,13 +242,13 @@ function csvCell(v){
   return /[",\n]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v;
 }
 function buildCSV(list){
-  var cols=['名前','種類','産地・購入先','日付','茶葉(g)','湯量(ml)','湯温(℃)','時間(秒)','何煎目',
+  var cols=['名前','種類','産地・購入先','内容量(g)','値段(円)','日付','茶葉(g)','湯量(ml)','湯温','時間','何煎目',
     '水色','茶葉の香り','茶葉のその他の香り','茶葉の香りの強さ','お茶の香り','お茶のその他の香り','お茶の香りの強さ',
     'うま味','甘み','渋み','苦み','酸味','飲み口','ボディ','余韻','総合評価','メモ'];
   var rows=[cols.map(csvCell).join(',')];
   list.forEach(function(r){
     rows.push([
-      r.name,r.type,r.origin,r.date,r.leaf,r.water,r.temp,r.sec,r.steep,
+      r.name,r.type,r.origin,r.packSize,r.price,r.date,r.leaf,r.water,r.temp,r.sec,r.steep,
       r.color!==null&&r.color!==undefined?COLORS[r.color].n:'',
       (r.aromaDry||[]).join('/'),r.aromaDryOther,r.aromaDryLv,
       (r.aromaWet||[]).join('/'),r.aromaWetOther,r.aromaWetLv,
@@ -287,7 +287,7 @@ async function doExport(){
   }
 }
 function newDraft(){
-  return {id:uid(),name:'',type:'緑茶',origin:'',date:today(),leaf:'',water:'',temp:'',sec:'',steep:'',
+  return {id:uid(),name:'',type:'緑茶',origin:'',packSize:'',price:'',date:today(),leaf:'',water:'',temp:'',sec:'',steep:'',
     color:null,aromaDry:[],aromaDryOther:'',aromaDryLv:2,aromaWet:[],aromaWetOther:'',aromaWetLv:2,taste:{umami:2,sweet:2,astr:2,bitter:1,sour:0},
     texture:[],body:2,finish:2,rating:0,memo:'',created:Date.now()};
 }
@@ -398,14 +398,18 @@ function renderEdit(){
     '<label class="field"><span>日付</span><input type="date" data-f="date" value="'+esc(d.date)+'"></label>'+
     '</div>'+
     '<label class="field"><span>産地・購入先</span><input type="text" data-f="origin" value="'+esc(d.origin)+'" placeholder="例:静岡・○○茶園"></label>'+
+    '<div class="grid2">'+
+    '<label class="field"><span>内容量(g)</span><input type="text" inputmode="decimal" data-f="packSize" value="'+esc(d.packSize)+'" placeholder="例:100"></label>'+
+    '<label class="field"><span>値段(円)</span><input type="text" inputmode="decimal" data-f="price" value="'+esc(d.price)+'" placeholder="例:1200"></label>'+
+    '</div>'+
   '</section>'+
 
   '<section class="section"><h2>淹れ方</h2>'+
     '<div class="grid3">'+
     '<label class="field"><span>茶葉(g)</span><input type="number" inputmode="decimal" min="0" step="0.5" data-f="leaf" value="'+esc(d.leaf)+'"></label>'+
     '<label class="field"><span>湯量(ml)</span><input type="number" inputmode="numeric" min="0" step="10" data-f="water" value="'+esc(d.water)+'"></label>'+
-    '<label class="field"><span>湯温(℃)</span><input type="number" inputmode="numeric" min="0" max="100" data-f="temp" value="'+esc(d.temp)+'"></label>'+
-    '<label class="field"><span>時間(秒)</span><input type="number" inputmode="numeric" min="0" data-f="sec" value="'+esc(d.sec)+'"></label>'+
+    '<label class="field"><span>湯温</span><input type="text" inputmode="text" data-f="temp" value="'+esc(d.temp)+'" placeholder="例:80 / 熱湯"></label>'+
+    '<label class="field"><span>時間</span><input type="text" inputmode="text" data-f="sec" value="'+esc(d.sec)+'" placeholder="例:60 / 3分"></label>'+
     '<label class="field"><span>何煎目</span><input type="number" inputmode="numeric" min="1" data-f="steep" value="'+esc(d.steep)+'"></label>'+
     '</div>'+
   '</section>'+
