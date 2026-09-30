@@ -194,8 +194,13 @@ function syncLabel(){ return getEndpoint()?'スプレッドシートと同期':'
 async function fetchRemote(){
   var ep=getEndpoint(); if(!ep) return null;
   var res=await fetch(ep);
-  var remote=await res.json();
-  return Array.isArray(remote)?remote:null;
+  if(!res.ok){ var err=new Error('HTTP '+res.status); err.httpStatus=res.status; throw err; }
+  var text=await res.text();
+  var remote;
+  try{ remote=JSON.parse(text); }
+  catch(e){ var err2=new Error('スプレッドシートから返ってきた内容がJSONではありません: '+text.slice(0,80)); throw err2; }
+  if(!Array.isArray(remote)) throw new Error('想定外の形式のデータでした');
+  return remote;
 }
 async function pushToSheet(silent){
   var ep=getEndpoint(); if(!ep) return;
@@ -245,13 +250,13 @@ async function refreshRemoteCount(){
     if(!document.getElementById('remoteCount')) return; /* view changed while awaiting */
     el.textContent=remote?remote.length+'件':'取得できませんでした';
   }catch(e){
-    if(document.getElementById('remoteCount')) el.textContent='取得できませんでした';
+    if(document.getElementById('remoteCount')) el.textContent='取得できませんでした('+(e&&e.message?e.message:'原因不明')+')';
   }
 }
 async function doPull(){
-  var remote;
-  try{ remote=await fetchRemote(); }catch(e){ remote=null; }
-  if(!remote){ toast('スプレッドシートから取得できませんでした(オフラインの可能性があります)'); return; }
+  var remote,errMsg='';
+  try{ remote=await fetchRemote(); }catch(e){ remote=null; errMsg=(e&&e.message)?e.message:'原因不明'; }
+  if(!remote){ toast('スプレッドシートから取得できませんでした:'+errMsg); return; }
   if(!window.confirm('この端末の記録('+records.length+'件)を、スプレッドシートの記録('+remote.length+'件)で置き換えます。よろしいですか?')) return;
   records=remote; persist(); toast('取得して置き換えました'); renderList();
 }
