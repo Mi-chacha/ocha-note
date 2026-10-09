@@ -252,9 +252,51 @@ function renderSync(){
       '<p class="sub" style="margin-bottom:16px">Google Apps ScriptのウェブアプリURLと合言葉を設定すると、記録をスプレッドシートと同期できます。</p>'+
       '<button class="btn primary" style="width:100%" data-act="sync-url">接続設定をする</button>'
     )+
+   '<button class="btn" style="width:100%; margin-top:16px" data-act="import">バックアップのJSONを読み込む</button>'+
    '</section></div>'+
    '<div class="dock"><div class="inner"><button class="btn" data-act="back">戻る</button></div></div>';
   if(ep) refreshRemoteCount();
+}
+/* ---------- import view: paste raw JSON backup to restore into this device ---------- */
+function renderImport(){
+  view.name='import';
+  app.innerHTML=
+   '<div class="wrap">'+
+   '<header class="top"><h1>JSONを読み込む</h1>'+
+   '<p class="sub">以前のバックアップや、スプレッドシートのセルからコピーしたJSONを貼り付けてください。</p></header>'+
+   '<section class="section" style="border-top:0">'+
+   '<textarea id="importText" style="min-height:220px; font-family:monospace; font-size:13px" placeholder="[ { &quot;id&quot;: ... } ]"></textarea>'+
+   '<p class="err" id="importErr"></p>'+
+   '</section></div>'+
+   '<div class="dock"><div class="inner">'+
+   '<button class="btn" data-act="back">戻る</button>'+
+   '<button class="btn primary" data-act="import-go">読み込む</button>'+
+   '</div></div>';
+}
+function doImport(){
+  var ta=document.getElementById('importText');
+  var errEl=document.getElementById('importErr');
+  var parsed;
+  try{ parsed=JSON.parse(ta.value); }
+  catch(e){ errEl.textContent='JSONとして読み取れませんでした。貼り付けた内容を確認してください。'; return; }
+  if(!Array.isArray(parsed)){ errEl.textContent='記録の配列(角かっこ[]で始まる形)ではありません。'; return; }
+  var base=newDraft();
+  var cleaned=parsed.filter(function(r){ return r&&typeof r==='object'; }).map(function(r){
+    var c=Object.assign({},base,r);
+    c.taste=Object.assign({},base.taste,r.taste||{});
+    if(!c.id) c.id=uid();
+    if(!c.created) c.created=Date.now();
+    return c;
+  });
+  if(!cleaned.length){ errEl.textContent='有効な記録が見つかりませんでした。'; return; }
+  var mode=window.confirm('この端末の今の記録('+records.length+'件)を、読み込んだ記録('+cleaned.length+'件)で置き換えます。よろしいですか?\n(キャンセルすると、追加する形にします)');
+  if(mode){
+    records=cleaned;
+  }else{
+    var ids={}; records.forEach(function(r){ ids[r.id]=1; });
+    cleaned.forEach(function(r){ if(!ids[r.id]){ records.push(r); ids[r.id]=1; } });
+  }
+  persist(); toast('読み込みました('+cleaned.length+'件)'); renderList();
 }
 async function refreshRemoteCount(){
   var el=document.getElementById('remoteCount'); if(!el) return;
@@ -280,6 +322,49 @@ async function doPush(){
   if(!window.confirm('スプレッドシートの記録('+remoteDesc+')を、この端末の記録('+records.length+'件)で置き換えます。よろしいですか?')) return;
   await pushToSheet(false);
   renderSync();
+}
+/* ---------- import view: paste JSON and merge/replace local records ---------- */
+function renderImport(){
+  view.name='import';
+  app.innerHTML=
+   '<div class="wrap">'+
+   '<header class="top"><h1>記録を読み込む</h1></header>'+
+   '<section class="section" style="border-top:0">'+
+   '<p class="sub" style="margin-bottom:10px">以前バックアップしたJSON形式のデータ(配列)を、ファイルを選ぶか、貼り付けてください。</p>'+
+   '<input type="file" id="importFile" accept="application/json,.json,.txt" style="margin-bottom:12px">'+
+   '<textarea id="importArea" style="min-height:220px; font-family:monospace; font-size:12px;" placeholder="[ ... ]"></textarea>'+
+   '<p class="err" id="importErr"></p>'+
+   '<button class="btn primary" style="width:100%; margin-top:14px" data-act="import-check">内容を確認する</button>'+
+   '</section></div>'+
+   '<div class="dock"><div class="inner"><button class="btn" data-act="back">戻る</button></div></div>';
+}
+function doImportCheck(){
+  var ta=document.getElementById('importArea'); var err=document.getElementById('importErr');
+  var parsed;
+  try{ parsed=JSON.parse(ta.value); }
+  catch(e){ err.textContent='JSONとして読み取れませんでした。貼り付けた内容を確認してください。'; return; }
+  if(!Array.isArray(parsed)||!parsed.length||typeof parsed[0]!=='object'){
+    err.textContent='記録の配列が見つかりませんでした。'; return;
+  }
+  err.textContent='';
+  var base=newDraft();
+  var imported=parsed.filter(function(r){return r&&typeof r==='object';}).map(function(r){
+    var c=Object.assign(JSON.parse(JSON.stringify(base)),r);
+    c.taste=Object.assign(JSON.parse(JSON.stringify(base.taste)),r.taste||{});
+    if(!c.id) c.id=uid();
+    if(!c.created) c.created=Date.now();
+    return c;
+  });
+  if(!window.confirm(imported.length+'件のデータが見つかりました。読み込みますか?')) return;
+  var replace=window.confirm('この端末の今の記録('+records.length+'件)を、読み込んだ'+imported.length+'件で置き換えますか?\nOK: 置き換える / キャンセル: 今の記録に追加する');
+  if(replace){
+    records=imported;
+  }else{
+    var map={}; records.forEach(function(r){map[r.id]=r;});
+    imported.forEach(function(r){map[r.id]=r;});
+    records=Object.keys(map).map(function(k){return map[k];});
+  }
+  persist(); toast('読み込みました'); renderList();
 }
 function openSyncSetup(){
   var cur=getEndpoint();
@@ -382,6 +467,7 @@ function renderList(){
      }).join('')+'</div>':'')+
    '<main id="results"></main></div>'+
    '<div class="dock"><div class="inner">'+
+   '<button class="btn" data-act="import">読み込む</button>'+
    (records.length?'<button class="btn" data-act="export">書き出す</button>':'')+
    '<button class="btn primary" data-act="new">一杯を記録する</button></div></div>';
   renderResults();
@@ -544,7 +630,11 @@ app.addEventListener('click',function(e){
   else if(act==='sync-clear'){
     if(window.confirm('同期を解除しますか?(スプレッドシート上のデータは消えません)')){ setEndpoint(''); setToken(''); toast('同期を解除しました'); renderSync(); }
   }
+  else if(act==='import'){ renderImport(); }
+  else if(act==='import-go'){ doImport(); }
   else if(act==='export'){ doExport(); }
+  else if(act==='import'){ renderImport(); }
+  else if(act==='import-check'){ doImportCheck(); }
   else if(act==='open'){
     var r=records.filter(function(x){return x.id===b.getAttribute('data-id');})[0]; if(!r) return;
     var c=JSON.parse(JSON.stringify(r));
