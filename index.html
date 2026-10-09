@@ -193,32 +193,36 @@ function setEndpoint(u){ try{ localStorage.setItem(EKEY,u); }catch(e){} }
 function getToken(){ try{ return localStorage.getItem(TKEY)||''; }catch(e){ return ''; } }
 function setToken(t){ try{ localStorage.setItem(TKEY,t); }catch(e){} }
 var syncing=false;
-function syncLabel(){ return getEndpoint()?'スプレッドシートと同期':'スプレッドシートと同期'; }
+function syncLabel(){ return 'スプレッドシートと同期'; }
+function errMsgFor(code){
+  if(code==='unauthorized') return '合言葉が正しくありません';
+  if(code==='locked') return '合言葉を間違えすぎたため、しばらく(10分程度)ロックされています';
+  return '通信に失敗しました';
+}
+async function callApi(action,data){
+  var ep=getEndpoint(); if(!ep) return {ok:false,error:'no_endpoint'};
+  var res;
+  try{
+    res=await fetch(ep,{method:'POST',headers:{'Content-Type':'text/plain;charset=utf-8'},
+      body:JSON.stringify({token:getToken(),action:action,data:data})});
+  }catch(e){ return {ok:false,error:'network'}; }
+  var out;
+  try{ out=JSON.parse(await res.text()); }
+  catch(e){ return {ok:false,error:'bad_response'}; }
+  return out&&typeof out==='object'?out:{ok:false,error:'bad_response'};
+}
 async function fetchRemote(){
-  var ep=getEndpoint(); if(!ep) return null;
-  var url=ep+(ep.indexOf('?')>-1?'&':'?')+'token='+encodeURIComponent(getToken());
-  var res=await fetch(url);
-  if(!res.ok){ var err=new Error('HTTP '+res.status); err.httpStatus=res.status; throw err; }
-  var text=await res.text();
-  var remote;
-  try{ remote=JSON.parse(text); }
-  catch(e){ var err2=new Error('スプレッドシートから返ってきた内容がJSONではありません: '+text.slice(0,80)); throw err2; }
-  if(remote&&remote.error==='unauthorized') throw new Error('認証に失敗しました(鍵が一致しません)');
-  if(!Array.isArray(remote)) throw new Error('想定外の形式のデータでした');
-  return remote;
+  var r=await callApi('get');
+  if(!r.ok) throw new Error(errMsgFor(r.error));
+  if(!Array.isArray(r.data)) throw new Error('想定外の形式のデータでした');
+  return r.data;
 }
 async function pushToSheet(silent){
-  var ep=getEndpoint(); if(!ep) return;
+  if(!getEndpoint()) return;
   syncing=true; updateSyncBtn();
-  try{
-    var res=await fetch(ep,{method:'POST',headers:{'Content-Type':'text/plain;charset=utf-8'},
-      body:JSON.stringify({token:getToken(),data:records})});
-    var out=null; try{ out=JSON.parse(await res.text()); }catch(e){}
-    if(out&&out.error==='unauthorized'){ if(!silent) toast('送信できませんでした(鍵が一致しません)'); }
-    else if(!silent) toast('スプレッドシートに送信しました');
-  }catch(e){
-    if(!silent) toast('送信に失敗しました(オフラインの可能性があります)');
-  }
+  var r=await callApi('push',records);
+  if(r.ok){ if(!silent) toast('スプレッドシートに送信しました'); }
+  else if(!silent) toast('送信できませんでした:'+errMsgFor(r.error));
   syncing=false; updateSyncBtn();
 }
 function updateSyncBtn(){
@@ -235,17 +239,17 @@ function renderSync(){
    '<section class="section" style="border-top:0">'+
     (ep?
       '<p class="sub">設定中のURL:<br><span style="word-break:break-all">'+esc(ep)+'</span></p>'+
-      '<p class="sub">鍵(トークン): '+(getToken()?'設定ずみ':'未設定(推奨)')+'</p>'+
+      '<p class="sub">合言葉: '+(getToken()?'設定ずみ':'未設定(このままだと同期できません)')+'</p>'+
       '<div class="field" style="margin:18px 0"><span>この端末の記録</span>'+records.length+'件</div>'+
       '<div class="field" style="margin:18px 0"><span>スプレッドシートの記録</span><span id="remoteCount">確認中…</span></div>'+
       '<button class="btn" style="width:100%; margin-bottom:10px" data-act="sync-pull">スプレッドシート→この端末に取得</button>'+
       '<p class="sub" style="margin:-4px 0 18px">この端末の記録が、スプレッドシートの内容で置き換わります。</p>'+
       '<button class="btn" style="width:100%; margin-bottom:10px" data-act="sync-push">この端末→スプレッドシートに送信</button>'+
       '<p class="sub" style="margin:-4px 0 18px">スプレッドシートの内容が、この端末の記録で置き換わります。</p>'+
-      '<button class="btn" style="width:100%; margin-bottom:10px" data-act="sync-url">接続設定(URL・鍵)を変更する</button>'+
+      '<button class="btn" style="width:100%; margin-bottom:10px" data-act="sync-url">接続設定(URL・合言葉)を変更する</button>'+
       '<button class="btn danger" style="width:100%" data-act="sync-clear">同期を解除する</button>'
       :
-      '<p class="sub" style="margin-bottom:16px">Google Apps ScriptのウェブアプリURLと鍵(トークン)を設定すると、記録をスプレッドシートと同期できます。</p>'+
+      '<p class="sub" style="margin-bottom:16px">Google Apps ScriptのウェブアプリURLと合言葉を設定すると、記録をスプレッドシートと同期できます。</p>'+
       '<button class="btn primary" style="width:100%" data-act="sync-url">接続設定をする</button>'
     )+
    '</section></div>'+
@@ -284,7 +288,7 @@ function openSyncSetup(){
   if(url.trim()) setEndpoint(url.trim());
   else if(!cur) return;
   var curT=getToken();
-  var tok=window.prompt('Apps Scriptに設定した鍵(トークン)を貼り付けてください。空のままにすると鍵なし(非推奨)になります。',curT||'');
+  var tok=window.prompt('Apps Scriptで setup を実行したときに表示された合言葉を貼り付けてください。',curT||'');
   if(tok!==null) setToken(tok.trim());
   renderSync();
 }
