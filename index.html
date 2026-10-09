@@ -2,7 +2,7 @@
 <html lang="ja">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
 <title>茶ノート</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -27,10 +27,12 @@
 }
 html{scroll-padding-top:env(safe-area-inset-top,0px);}
 *,*::before,*::after{box-sizing:inherit}
+html{ touch-action:manipulation; }
 body{
   margin:0; background:var(--bg); color:var(--ink);
   font-family:"Zen Kaku Gothic New","Hiragino Sans","Yu Gothic",sans-serif;
   font-size:16px; line-height:1.7; -webkit-text-size-adjust:100%;
+  touch-action:manipulation; overscroll-behavior-y:contain;
 }
 h1,h2{font-family:"Zen Old Mincho","Hiragino Mincho ProN","Yu Mincho",serif; font-weight:700; margin:0;}
 h1{font-size:30px; letter-spacing:.08em; line-height:1.3;}
@@ -323,49 +325,6 @@ async function doPush(){
   await pushToSheet(false);
   renderSync();
 }
-/* ---------- import view: paste JSON and merge/replace local records ---------- */
-function renderImport(){
-  view.name='import';
-  app.innerHTML=
-   '<div class="wrap">'+
-   '<header class="top"><h1>記録を読み込む</h1></header>'+
-   '<section class="section" style="border-top:0">'+
-   '<p class="sub" style="margin-bottom:10px">以前バックアップしたJSON形式のデータ(配列)を、ファイルを選ぶか、貼り付けてください。</p>'+
-   '<input type="file" id="importFile" accept="application/json,.json,.txt" style="margin-bottom:12px">'+
-   '<textarea id="importArea" style="min-height:220px; font-family:monospace; font-size:12px;" placeholder="[ ... ]"></textarea>'+
-   '<p class="err" id="importErr"></p>'+
-   '<button class="btn primary" style="width:100%; margin-top:14px" data-act="import-check">内容を確認する</button>'+
-   '</section></div>'+
-   '<div class="dock"><div class="inner"><button class="btn" data-act="back">戻る</button></div></div>';
-}
-function doImportCheck(){
-  var ta=document.getElementById('importArea'); var err=document.getElementById('importErr');
-  var parsed;
-  try{ parsed=JSON.parse(ta.value); }
-  catch(e){ err.textContent='JSONとして読み取れませんでした。貼り付けた内容を確認してください。'; return; }
-  if(!Array.isArray(parsed)||!parsed.length||typeof parsed[0]!=='object'){
-    err.textContent='記録の配列が見つかりませんでした。'; return;
-  }
-  err.textContent='';
-  var base=newDraft();
-  var imported=parsed.filter(function(r){return r&&typeof r==='object';}).map(function(r){
-    var c=Object.assign(JSON.parse(JSON.stringify(base)),r);
-    c.taste=Object.assign(JSON.parse(JSON.stringify(base.taste)),r.taste||{});
-    if(!c.id) c.id=uid();
-    if(!c.created) c.created=Date.now();
-    return c;
-  });
-  if(!window.confirm(imported.length+'件のデータが見つかりました。読み込みますか?')) return;
-  var replace=window.confirm('この端末の今の記録('+records.length+'件)を、読み込んだ'+imported.length+'件で置き換えますか?\nOK: 置き換える / キャンセル: 今の記録に追加する');
-  if(replace){
-    records=imported;
-  }else{
-    var map={}; records.forEach(function(r){map[r.id]=r;});
-    imported.forEach(function(r){map[r.id]=r;});
-    records=Object.keys(map).map(function(k){return map[k];});
-  }
-  persist(); toast('読み込みました'); renderList();
-}
 function openSyncSetup(){
   var cur=getEndpoint();
   var url=window.prompt(cur?'新しいURLを貼り付けてください(変更しないならそのままOK)。':'Google Apps ScriptのウェブアプリURLを貼り付けてください。', cur||'');
@@ -467,7 +426,6 @@ function renderList(){
      }).join('')+'</div>':'')+
    '<main id="results"></main></div>'+
    '<div class="dock"><div class="inner">'+
-   '<button class="btn" data-act="import">読み込む</button>'+
    (records.length?'<button class="btn" data-act="export">書き出す</button>':'')+
    '<button class="btn primary" data-act="new">一杯を記録する</button></div></div>';
   renderResults();
@@ -633,8 +591,6 @@ app.addEventListener('click',function(e){
   else if(act==='import'){ renderImport(); }
   else if(act==='import-go'){ doImport(); }
   else if(act==='export'){ doExport(); }
-  else if(act==='import'){ renderImport(); }
-  else if(act==='import-check'){ doImportCheck(); }
   else if(act==='open'){
     var r=records.filter(function(x){return x.id===b.getAttribute('data-id');})[0]; if(!r) return;
     var c=JSON.parse(JSON.stringify(r));
