@@ -187,18 +187,23 @@ var tId;
 function toast(msg){ toastEl.textContent=msg; toastEl.classList.add('show'); clearTimeout(tId); tId=setTimeout(function(){toastEl.classList.remove('show');},2600); }
 
 var EKEY='tea-notes-endpoint';
+var TKEY='tea-notes-token';
 function getEndpoint(){ try{ return localStorage.getItem(EKEY)||''; }catch(e){ return ''; } }
 function setEndpoint(u){ try{ localStorage.setItem(EKEY,u); }catch(e){} }
+function getToken(){ try{ return localStorage.getItem(TKEY)||''; }catch(e){ return ''; } }
+function setToken(t){ try{ localStorage.setItem(TKEY,t); }catch(e){} }
 var syncing=false;
 function syncLabel(){ return getEndpoint()?'スプレッドシートと同期':'スプレッドシートと同期'; }
 async function fetchRemote(){
   var ep=getEndpoint(); if(!ep) return null;
-  var res=await fetch(ep);
+  var url=ep+(ep.indexOf('?')>-1?'&':'?')+'token='+encodeURIComponent(getToken());
+  var res=await fetch(url);
   if(!res.ok){ var err=new Error('HTTP '+res.status); err.httpStatus=res.status; throw err; }
   var text=await res.text();
   var remote;
   try{ remote=JSON.parse(text); }
   catch(e){ var err2=new Error('スプレッドシートから返ってきた内容がJSONではありません: '+text.slice(0,80)); throw err2; }
+  if(remote&&remote.error==='unauthorized') throw new Error('認証に失敗しました(鍵が一致しません)');
   if(!Array.isArray(remote)) throw new Error('想定外の形式のデータでした');
   return remote;
 }
@@ -206,8 +211,11 @@ async function pushToSheet(silent){
   var ep=getEndpoint(); if(!ep) return;
   syncing=true; updateSyncBtn();
   try{
-    await fetch(ep,{method:'POST',headers:{'Content-Type':'text/plain;charset=utf-8'},body:JSON.stringify(records)});
-    if(!silent) toast('スプレッドシートに送信しました');
+    var res=await fetch(ep,{method:'POST',headers:{'Content-Type':'text/plain;charset=utf-8'},
+      body:JSON.stringify({token:getToken(),data:records})});
+    var out=null; try{ out=JSON.parse(await res.text()); }catch(e){}
+    if(out&&out.error==='unauthorized'){ if(!silent) toast('送信できませんでした(鍵が一致しません)'); }
+    else if(!silent) toast('スプレッドシートに送信しました');
   }catch(e){
     if(!silent) toast('送信に失敗しました(オフラインの可能性があります)');
   }
@@ -227,17 +235,18 @@ function renderSync(){
    '<section class="section" style="border-top:0">'+
     (ep?
       '<p class="sub">設定中のURL:<br><span style="word-break:break-all">'+esc(ep)+'</span></p>'+
+      '<p class="sub">鍵(トークン): '+(getToken()?'設定ずみ':'未設定(推奨)')+'</p>'+
       '<div class="field" style="margin:18px 0"><span>この端末の記録</span>'+records.length+'件</div>'+
       '<div class="field" style="margin:18px 0"><span>スプレッドシートの記録</span><span id="remoteCount">確認中…</span></div>'+
       '<button class="btn" style="width:100%; margin-bottom:10px" data-act="sync-pull">スプレッドシート→この端末に取得</button>'+
       '<p class="sub" style="margin:-4px 0 18px">この端末の記録が、スプレッドシートの内容で置き換わります。</p>'+
       '<button class="btn" style="width:100%; margin-bottom:10px" data-act="sync-push">この端末→スプレッドシートに送信</button>'+
       '<p class="sub" style="margin:-4px 0 18px">スプレッドシートの内容が、この端末の記録で置き換わります。</p>'+
-      '<button class="btn" style="width:100%; margin-bottom:10px" data-act="sync-url">URLを変更する</button>'+
+      '<button class="btn" style="width:100%; margin-bottom:10px" data-act="sync-url">接続設定(URL・鍵)を変更する</button>'+
       '<button class="btn danger" style="width:100%" data-act="sync-clear">同期を解除する</button>'
       :
-      '<p class="sub" style="margin-bottom:16px">Google Apps ScriptのウェブアプリURLを設定すると、記録をスプレッドシートと同期できます。</p>'+
-      '<button class="btn primary" style="width:100%" data-act="sync-url">URLを設定する</button>'
+      '<p class="sub" style="margin-bottom:16px">Google Apps ScriptのウェブアプリURLと鍵(トークン)を設定すると、記録をスプレッドシートと同期できます。</p>'+
+      '<button class="btn primary" style="width:100%" data-act="sync-url">接続設定をする</button>'
     )+
    '</section></div>'+
    '<div class="dock"><div class="inner"><button class="btn" data-act="back">戻る</button></div></div>';
@@ -270,9 +279,13 @@ async function doPush(){
 }
 function openSyncSetup(){
   var cur=getEndpoint();
-  var url=window.prompt(cur?'新しいURLを貼り付けてください。':'Google Apps ScriptのウェブアプリURLを貼り付けてください。', cur||'');
-  if(!url||!url.trim()) return;
-  setEndpoint(url.trim());
+  var url=window.prompt(cur?'新しいURLを貼り付けてください(変更しないならそのままOK)。':'Google Apps ScriptのウェブアプリURLを貼り付けてください。', cur||'');
+  if(url===null) return;
+  if(url.trim()) setEndpoint(url.trim());
+  else if(!cur) return;
+  var curT=getToken();
+  var tok=window.prompt('Apps Scriptに設定した鍵(トークン)を貼り付けてください。空のままにすると鍵なし(非推奨)になります。',curT||'');
+  if(tok!==null) setToken(tok.trim());
   renderSync();
 }
 
@@ -525,7 +538,7 @@ app.addEventListener('click',function(e){
   else if(act==='sync-pull'){ doPull(); }
   else if(act==='sync-push'){ doPush(); }
   else if(act==='sync-clear'){
-    if(window.confirm('同期を解除しますか?(スプレッドシート上のデータは消えません)')){ setEndpoint(''); toast('同期を解除しました'); renderSync(); }
+    if(window.confirm('同期を解除しますか?(スプレッドシート上のデータは消えません)')){ setEndpoint(''); setToken(''); toast('同期を解除しました'); renderSync(); }
   }
   else if(act==='export'){ doExport(); }
   else if(act==='open'){
